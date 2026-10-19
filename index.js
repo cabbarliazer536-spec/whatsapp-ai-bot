@@ -1,6 +1,17 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const fetch = require('node-fetch');
+const http = require('http');
+
+// 🌐 Render-in tələb etdiyi HTTP server (Port 10000) - Timed Out xətasının qarşısını alır
+const PORT = process.env.PORT || 10000;
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('WhatsApp AI Bot 7/24 Aktivdir!\n');
+});
+server.listen(PORT, () => {
+    console.log(`Server ${PORT} portunda işləyir.`);
+});
 
 // 🔑 API Açarını Render-in Environment Variables hissəsindən təhlükəsiz götürürük
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
