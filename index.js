@@ -1,6 +1,7 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, delay } = require('@whiskeysockets/baileys');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const http = require('http');
+const pino = require('pino');
 
 // Render üçün HTTP Server (Port 10000)
 const PORT = process.env.PORT || 10000;
@@ -12,9 +13,8 @@ http.createServer((req, res) => {
 // Gemini AI Setup
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Gemini-3.8-flash və ehtiyat modellərlə işləyən funksiya
 async function generateGeminiReply(prompt) {
-    const modelsToTry = ["gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"];
+    const modelsToTry = ["gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash"];
     
     for (const modelName of modelsToTry) {
         try {
@@ -24,18 +24,16 @@ async function generateGeminiReply(prompt) {
                 return result.response.text();
             }
         } catch (err) {
-            console.warn(`[${modelName}] modeli xəta verdi, növbəti modelə keçilir...`, err.message);
+            console.warn(`[${modelName}] modeli xəta verdi, növbəti modelə keçilir...`);
         }
     }
     throw new Error("Bütün Gemini modelləri xəta verdi.");
 }
 
-// Sizin nömrəniz
 const PHONE_NUMBER = "994554219530"; 
 
-// NAXCARDS RƏSMİ ŞABLONLARI VƏ AÇAR SÖZ QAYDALARI
 const MY_TEMPLATES = `
-Sən "Naxcars" avtomobil elanları platformasının rəsmi WhatsApp köməkçisimsən. 
+Sən "Naxcars" avtomobil elanları platformasının rəsmi WhatsApp köməkçisisən. 
 Müştərinin mesajında "naxcars", "elan", "maşın", "paylaş", "avtomobil", "qiymət", "ödəniş" kimi sözlər və ya bu mövzularda suallar olduqda, mütləq aşağıdakı 7 rəsmi şablondan birini seçərək cavab ver:
 
 1. Ümumi məlumat, qiymətlər və paketlər soruşulduqda:
@@ -80,6 +78,7 @@ async function startBot() {
         version,
         auth: state,
         printQRInTerminal: false,
+        logger: pino({ level: 'silent' }), // Logları təmizləmək və 515 xətalarının qarşısını almaq üçün
         browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
@@ -96,12 +95,23 @@ async function startBot() {
             } catch (err) {
                 console.error("Pairing code xətası:", err);
             }
-        }, 3000);
+        }, 4000);
     }
 
     sock.ev.on('connection.update', async (update) => {
-        const { connection } = update;
-        if (connection === 'open') {
+        const { connection, lastDisconnect } = update;
+        
+        if (connection === 'close') {
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
+            console.log('Bağlantı kəsildi, səbəb kodu:', statusCode);
+            
+            // Əgər qeydiyyat silinibsə və ya loggedOut olubsa yenidən başladırıq
+            if (statusCode !== DisconnectReason.loggedOut) {
+                setTimeout(() => startBot(), 3000);
+            } else {
+                console.log('Serverdən tamamilə çıxış edilib. Yenidən qeydiyyat lazımdır.');
+            }
+        } else if (connection === 'open') {
             console.log('✅ Bot WhatsApp-a UĞURLA BAĞLANDI VƏ 7/24 AKTİVDİR!');
         }
     });
