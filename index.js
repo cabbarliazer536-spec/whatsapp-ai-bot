@@ -67,18 +67,19 @@ async function startBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
+    // Bağlantının sabitləşməsi üçün 7 saniyə gözləyib tək və dəqiq kod istəyirik
     if (!sock.authState.creds.registered) {
         setTimeout(async () => {
             try {
                 let code = await sock.requestPairingCode(PHONE_NUMBER);
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
                 console.log("\n==========================================");
-                console.log(`🔑 SİZİN PAIRING KODUNUZ: ${code}`);
+                console.log(`🔑 SİZİN SABİT TƏSDİQ KODUNUZ: ${code}`);
                 console.log("==========================================\n");
             } catch (err) {
                 console.error("Pairing code xətası:", err);
             }
-        }, 3000);
+        }, 7000);
     }
 
     sock.ev.on('connection.update', async (update) => {
