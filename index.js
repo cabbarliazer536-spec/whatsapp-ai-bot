@@ -78,8 +78,11 @@ async function startBot() {
         version,
         auth: state,
         printQRInTerminal: false,
-        logger: pino({ level: 'silent' }), // Logları təmizləmək və 515 xətalarının qarşısını almaq üçün
-        browser: ["Ubuntu", "Chrome", "20.0.04"]
+        logger: pino({ level: 'silent' }),
+        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 60000,
+        keepAliveIntervalMs: 10000
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -90,12 +93,12 @@ async function startBot() {
                 let code = await sock.requestPairingCode(PHONE_NUMBER);
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
                 console.log("\n==========================================");
-                console.log(`🔑 SİZİN PAIRING KODUNUZ: ${code}`);
+                console.log(`🔑 SİZİN YENİ PAIRING KODUNUZ: ${code}`);
                 console.log("==========================================\n");
             } catch (err) {
-                console.error("Pairing code xətası:", err);
+                console.error("Pairing code almaq alınmadı, yenidən cəhd edilir...", err.message);
             }
-        }, 4000);
+        }, 6000);
     }
 
     sock.ev.on('connection.update', async (update) => {
@@ -105,11 +108,11 @@ async function startBot() {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             console.log('Bağlantı kəsildi, səbəb kodu:', statusCode);
             
-            // Əgər qeydiyyat silinibsə və ya loggedOut olubsa yenidən başladırıq
             if (statusCode !== DisconnectReason.loggedOut) {
                 setTimeout(() => startBot(), 3000);
             } else {
                 console.log('Serverdən tamamilə çıxış edilib. Yenidən qeydiyyat lazımdır.');
+                setTimeout(() => startBot(), 3000);
             }
         } else if (connection === 'open') {
             console.log('✅ Bot WhatsApp-a UĞURLA BAĞLANDI VƏ 7/24 AKTİVDİR!');
