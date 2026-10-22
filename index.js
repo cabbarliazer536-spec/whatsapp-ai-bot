@@ -2,6 +2,7 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLat
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const http = require('http');
 const pino = require('pino');
+const fs = require('fs');
 
 // Render üçün HTTP Server (Port 10000)
 const PORT = process.env.PORT || 10000;
@@ -33,7 +34,7 @@ async function generateGeminiReply(prompt) {
 const PHONE_NUMBER = "994554219530"; 
 
 const MY_TEMPLATES = `
-Sən "Naxcars" avtomobil elanları platformasının rəsmi WhatsApp köməkçisisən. 
+Sən "Naxcars" avtomobil elanları platformasının rəsmi WhatsApp köməkçisən. 
 Müştərinin mesajında "naxcars", "elan", "maşın", "paylaş", "avtomobil", "qiymət", "ödəniş" kimi sözlər və ya bu mövzularda suallar olduqda, mütləq aşağıdakı 7 rəsmi şablondan birini seçərək cavab ver:
 
 1. Ümumi məlumat, qiymətlər və paketlər soruşulduqda:
@@ -93,12 +94,12 @@ async function startBot() {
                 let code = await sock.requestPairingCode(PHONE_NUMBER);
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
                 console.log("\n==========================================");
-                console.log(`🔑 SİZİN YENİ PAIRING KODUNUZ: ${code}`);
+                console.log(`🔑 SİZİN TƏMİZ YENİ PAIRING KODUNUZ: ${code}`);
                 console.log("==========================================\n");
             } catch (err) {
                 console.error("Pairing code almaq alınmadı, yenidən cəhd edilir...", err.message);
             }
-        }, 6000);
+        }, 5000);
     }
 
     sock.ev.on('connection.update', async (update) => {
@@ -108,12 +109,17 @@ async function startBot() {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             console.log('Bağlantı kəsildi, səbəb kodu:', statusCode);
             
-            if (statusCode !== DisconnectReason.loggedOut) {
-                setTimeout(() => startBot(), 3000);
-            } else {
-                console.log('Serverdən tamamilə çıxış edilib. Yenidən qeydiyyat lazımdır.');
-                setTimeout(() => startBot(), 3000);
+            // Əgər 401 və ya loggedOut olarsa, köhnə xətalı auth qovluğunu silirik ki, dövrəyə düşməsin
+            if (statusCode === 401 || statusCode === DisconnectReason.loggedOut) {
+                console.log('⚠️ Sessiya xətası (401). Köhnə auth qovluğu təmizlənir...');
+                try {
+                    fs.rmSync('auth_info_baileys', { recursive: true, force: true });
+                } catch (e) {
+                    console.error('Qovluq silinərkən xəta:', e);
+                }
             }
+
+            setTimeout(() => startBot(), 4000);
         } else if (connection === 'open') {
             console.log('✅ Bot WhatsApp-a UĞURLA BAĞLANDI VƏ 7/24 AKTİVDİR!');
         }
