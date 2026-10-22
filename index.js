@@ -11,14 +11,31 @@ http.createServer((req, res) => {
 
 // Gemini AI Setup
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+// Avtomatik Cavab Generation Funksiyası (Xəta olduqda ehtiyat modellərə keçir)
+async function generateGeminiReply(prompt) {
+    const modelsToTry = ["gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash"];
+    
+    for (const modelName of modelsToTry) {
+        try {
+            const model = genAI.getGenerativeModel({ model: modelName });
+            const result = await model.generateContent(prompt);
+            if (result && result.response) {
+                return result.response.text();
+            }
+        } catch (err) {
+            console.warn(`[${modelName}] modeli ilə xəta oldu, növbəti model yoxlanılır...`, err.message);
+        }
+    }
+    throw new Error("Hər iki Gemini modeli də xəta verdi.");
+}
 
 // Sizin nömrəniz
 const PHONE_NUMBER = "994554219530"; 
 
 // NAXCARDS RƏSMİ ŞABLONLARI VƏ QAYDALARI
 const MY_TEMPLATES = `
-Sən "Naxcars" avtomobil elanları platformasının rəsmi WhatsApp köməkçisimsən. Müştərilərin suallarına aşağıdakı təsdiqlənmiş şablonlara və məlumatlara əsaslanaraq nəzakətli, dəqiq və peşəkar cavablar ver.
+Sən "Naxcars" avtomobil elanları platformasının rəsmi WhatsApp köməkçisisən. Müştərilərin suallarına aşağıdakı təsdiqlənmiş şablonlara və məlumatlara əsaslanaraq nəzakətli, dəqiq və peşəkar cavablar ver.
 
 AZƏRBAYCAN DİLİNDƏ RƏSMİ MƏLUMATLAR VƏ ŞABLONLAR:
 
@@ -76,7 +93,7 @@ async function startBot() {
                 console.log(`🔑 SİZİN PAIRING KODUNUZ: ${code}`);
                 console.log("==========================================\n");
             } catch (err) {
-                console.error("Pairing code alınarkən xəta:", err);
+                console.error("Pairing code xətası:", err);
             }
         }, 3000);
     }
@@ -113,18 +130,19 @@ async function startBot() {
 
             try {
                 await sock.readMessages([msg.key]);
-                await delay(Math.floor(Math.random() * 2000) + 2000);
+                await delay(2000);
                 await sock.sendPresenceUpdate('composing', from);
 
                 const prompt = `Müştəri mesajı: "${userMessage}"\n\nBaza məlumatları və şablonlar:\n${MY_TEMPLATES}\n\nBu məlumatlara əsasən müştəriyə uyğun rəsmi cavab yaz:`;
-                const result = await model.generateContent(prompt);
-                const replyText = result.response.text();
+                
+                // Avtomatik model seçimi ilə cavab almaq
+                const replyText = await generateGeminiReply(prompt);
 
                 await sock.sendPresenceUpdate('paused', from);
                 await sock.sendMessage(from, { text: replyText });
 
             } catch (error) {
-                console.error('Xəta:', error);
+                console.error('Gemini AI Cavab Xətası:', error);
                 await sock.sendMessage(from, { text: "Salam! Müraciətiniz qəbul olundu, qısa zamanda baxılacaq." });
             }
         }
