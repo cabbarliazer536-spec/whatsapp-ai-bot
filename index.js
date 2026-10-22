@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, delay } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, delay, Browsers } = require('@whiskeysockets/baileys');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const http = require('http');
 const pino = require('pino');
@@ -80,7 +80,7 @@ async function startBot() {
         auth: state,
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
-        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        browser: Browsers.macOS('Desktop'), // WhatsApp tərəfindən ən stabil qəbul edilən imza
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
         keepAliveIntervalMs: 10000
@@ -94,12 +94,12 @@ async function startBot() {
                 let code = await sock.requestPairingCode(PHONE_NUMBER);
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
                 console.log("\n==========================================");
-                console.log(`🔑 SİZİN TƏMİZ YENİ PAIRING KODUNUZ: ${code}`);
+                console.log(`🔑 YENİ TƏSDİQ KODUNUZ: ${code}`);
                 console.log("==========================================\n");
             } catch (err) {
-                console.error("Pairing code almaq alınmadı, yenidən cəhd edilir...", err.message);
+                console.error("Pairing code almaq alınmadı:", err.message);
             }
-        }, 5000);
+        }, 7000);
     }
 
     sock.ev.on('connection.update', async (update) => {
@@ -109,14 +109,11 @@ async function startBot() {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             console.log('Bağlantı kəsildi, səbəb kodu:', statusCode);
             
-            // Əgər 401 və ya loggedOut olarsa, köhnə xətalı auth qovluğunu silirik ki, dövrəyə düşməsin
             if (statusCode === 401 || statusCode === DisconnectReason.loggedOut) {
-                console.log('⚠️ Sessiya xətası (401). Köhnə auth qovluğu təmizlənir...');
+                console.log('⚠️ Sessiya yenilənir, auth qovluğu təmizlənir...');
                 try {
                     fs.rmSync('auth_info_baileys', { recursive: true, force: true });
-                } catch (e) {
-                    console.error('Qovluq silinərkən xəta:', e);
-                }
+                } catch (e) {}
             }
 
             setTimeout(() => startBot(), 4000);
