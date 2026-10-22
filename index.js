@@ -13,15 +13,45 @@ http.createServer((req, res) => {
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-// Sizin Azərbaycan nömrəniz (994 + 554219530)
+// Sizin nömrəniz
 const PHONE_NUMBER = "994554219530"; 
 
+// NAXCARDS RƏSMİ ŞABLONLARI VƏ QAYDALARI
 const MY_TEMPLATES = `
-Sen menim sexsi WhatsApp asistanimsa. Nəzakətli, qısa və aydın cavablar ver.
-Bizim təklif etdiyimiz xidmətlər:
-- Veb saytların və botların hazırlanması
-- Xüsusi avtomatlaşdırma skriptləri
-Sual verdikdə qısa və dürüst cavab ver.
+Sən "Naxcars" avtomobil elanları platformasının rəsmi WhatsApp köməkçisimsən. Müştərilərin suallarına aşağıdakı təsdiqlənmiş şablonlara və məlumatlara əsaslanaraq nəzakətli, dəqiq və peşəkar cavablar ver.
+
+AZƏRBAYCAN DİLİNDƏ RƏSMİ MƏLUMATLAR VƏ ŞABLONLAR:
+
+1. Ümumi məlumat, qiymətlər və paketlər soruşulduqda:
+- Salam hər vaxtınız xeyir, 🚗Avtomobilinizi bizimlə sürətli satın!
+- Naxcars Platforması olaraq sərfəli qiymətlərlə elanlarınızı paylaşa bilərik, Qiymətlər elan növünə görə dəyişir:
+  * Standart: (2 AZN — 14 gün)
+  * Premium: (3 AZN — 20 gün)
+  * VIP: (4 AZN — 30 gün)
+- Elanlar saytda VIP, Premium və Standart ardıcıllığı ilə sıralanır.
+- ÖZƏL HƏDİYYƏMİZ: Saytımızda yerləşdirilən hər bir Premium Paketli elan müddəti bitdikdən sonra VİP Paketli elan növü olaraq əlavə hədiyyə müddəti qazanır.
+- Saytımız İnternet üzərindən qlobal axtarış sistemlərinə tam inteqrasiya olunub! Google və digər brauzerlərdə sadəcə "Naxcars" yazaraq axtarış edib baxa bilərsiniz. Link: https://naxcarspltfrm.base44.app/
+- Diqqətiniz üçün təşəkkürlər!
+
+2. Elanın harada paylaşılacağı soruşulduqda:
+- Salam hər vaxtınız xeyir olsun, elanı saytımızda, Facebook səhifəmizdə və maşın alqı-satqı qruplarımızda, həmçinin Telegramda elan alqı-satqı kanallarımızda paylaşılır, avtomobilinizi bizimlə sürətli satın!
+
+3. Elan yerləşdirmək istədikdə / şəkil və məlumat istədikdə:
+- Neçə günlük istəyirsiz zəhmət olmasa qeyd edin, avtomobilin şəkillərini və haqqında məlumatı göndərin, paylaşaq.
+
+4. Əlavə suallar olduqda:
+- Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan yazın cavablandırılacaq, təşəkkürlər.
+
+5. Ödəniş təsdiqləndikdə:
+- ✅️Ödəniş təsdiqləndi, təşəkkürlər!
+
+6. Ödəniş xatırlatması (ödənilməyibsə):
+- ⚠️DİQQƏT! XATIRLATMA! Elan ödənişi edilmədiyi təqdirdə gün sonunda 00:00'da elanınız platformalardan silinəcəkdir!
+
+7. Elan yerləşdirildikdən sonra link gözləyənlərə:
+- Tamam, yerləşdirilib linki sizə atılacaq özünüz də baxacaqsınız, sonra ödəniş üçün məlumat göndəriləcək, təşəkkürlər.
+
+Təlimat: Müştərinin mesajını təhlil et və yuxarıdakı rəsmi məlumatlara uyğun olaraq ən uyğun cavabı formalaşdır.
 `;
 
 async function startBot() {
@@ -31,13 +61,12 @@ async function startBot() {
     const sock = makeWASocket({
         version,
         auth: state,
-        printQRInTerminal: false, // QR kod lazımdır deyil
+        printQRInTerminal: false,
         browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Qeydiyyat olmayıbsa Pairing Code tələb et
     if (!sock.authState.creds.registered) {
         setTimeout(async () => {
             try {
@@ -66,7 +95,6 @@ async function startBot() {
         }
     });
 
-    // Mesajları emal etmək
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
 
@@ -74,7 +102,7 @@ async function startBot() {
             if (!msg.message || msg.key.fromMe) continue;
 
             const from = msg.key.remoteJid;
-            if (from.endsWith('@g.us')) continue; // Qruplara cavab vermir
+            if (from.endsWith('@g.us')) continue; 
 
             const userMessage = msg.message.conversation || 
                                 msg.message.extendedTextMessage?.text || '';
@@ -88,7 +116,7 @@ async function startBot() {
                 await delay(Math.floor(Math.random() * 2000) + 2000);
                 await sock.sendPresenceUpdate('composing', from);
 
-                const prompt = `İstifadəçi mesajı: "${userMessage}"\n\nTəlimatlar:\n${MY_TEMPLATES}\n\nBu təlimatlara əsasən istifadəçiyə cavab yaz:`;
+                const prompt = `Müştəri mesajı: "${userMessage}"\n\nBaza məlumatları və şablonlar:\n${MY_TEMPLATES}\n\nBu məlumatlara əsasən müştəriyə uyğun rəsmi cavab yaz:`;
                 const result = await model.generateContent(prompt);
                 const replyText = result.response.text();
 
