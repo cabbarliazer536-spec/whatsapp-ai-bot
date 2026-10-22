@@ -1,91 +1,104 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require('@whiskeysockets/baileys');
-const qrcode = require('qrcode-terminal');
-const fetch = require('node-fetch');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, delay } = require('@whiskeysockets/baileys');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const http = require('http');
 
-// 🌐 Render-in tələb etdiyi HTTP server (Port 10000) - Timed Out xətasının qarşısını alır
+// Render üçün HTTP Server (Port 10000)
 const PORT = process.env.PORT || 10000;
-const server = http.createServer((req, res) => {
+http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('WhatsApp AI Bot 7/24 Aktivdir!\n');
-});
-server.listen(PORT, () => {
-    console.log(`Server ${PORT} portunda işləyir.`);
-});
+    res.end('WhatsApp Bot Server Alive!');
+}).listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 
-// 🔑 API Açarını Render-in Environment Variables hissəsindən təhlükəsiz götürürük
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+// Gemini AI Setup
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-// 📝 SİZİN ŞABLON CAVABLARINIZ
+// Sizin Azərbaycan nömrəniz (994 + 554219530)
+const PHONE_NUMBER = "994554219530"; 
+
 const MY_TEMPLATES = `
-1. Qiymət və ya xidmət soruşursa: "Salam! Xidmətlərimiz haqqında ətraflı məlumatı saytımızdan əldə edə bilərsiniz."
-2. İş saatları soruşursa: "Salam! İş saatlarımız həftəiçi 09:00 - 18:00 kimidir."
-3. Sadəcə salam verirsə: "Salam! Müraciətiniz üçün təşəkkür edirik, qısa müddətdə geri dönüş edəcəyik."
+Sen menim sexsi WhatsApp asistanimsa. Nəzakətli, qısa və aydın cavablar ver.
+Bizim təklif etdiyimiz xidmətlər:
+- Veb saytların və botların hazırlanması
+- Xüsusi avtomatlaşdırma skriptləri
+Sual verdikdə qısa və dürüst cavab ver.
 `;
-
-function getRandomDelay(minSeconds, maxSeconds) {
-    return Math.floor(Math.random() * (maxSeconds - minSeconds + 1) + minSeconds) * 1000;
-}
-
-async function getAIResponse(incomingMessage) {
-    try {
-        if (!GEMINI_API_KEY) {
-            console.error("XƏTA: GEMINI_API_KEY təyin edilməyib!");
-            return "Salam! Müraciətiniz qəbul olundu, qısa zamanda baxılacaq.";
-        }
-
-        const prompt = `Sən WhatsApp asistansan. Şablonlar:\n${MY_TEMPLATES}\nGələn Mesaj: "${incomingMessage}"\nYuxarıdakı şablonlardan ən uyğununu seç və qısa, nəzakətli cavab yaz.`;
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-        });
-        const data = await response.json();
-        return data.candidates[0].content.parts[0].text;
-    } catch (error) {
-        console.error("AI Error:", error);
-        return "Salam! Müraciətiniz qəbul olundu, qısa zamanda baxılacaq.";
-    }
-}
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
-    const sock = makeWASocket({ auth: state, printQRInTerminal: true, browser: ["Ubuntu", "Chrome", "20.0.04"] });
+    const { version } = await fetchLatestBaileysVersion();
+
+    const sock = makeWASocket({
+        version,
+        auth: state,
+        printQRInTerminal: false, // QR kod lazımdır deyil
+        browser: ["Ubuntu", "Chrome", "20.0.04"]
+    });
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        if (qr) qrcode.generate(qr, { small: true });
+    // Qeydiyyat olmayıbsa Pairing Code tələb et
+    if (!sock.authState.creds.registered) {
+        setTimeout(async () => {
+            try {
+                let code = await sock.requestPairingCode(PHONE_NUMBER);
+                code = code?.match(/.{1,4}/g)?.join("-") || code;
+                console.log("\n==========================================");
+                console.log(`🔑 SİZİN PAIRING KODUNUZ: ${code}`);
+                console.log("==========================================\n");
+            } catch (err) {
+                console.error("Pairing code alınarkən xəta:", err);
+            }
+        }, 3000);
+    }
+
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect } = update;
+        
         if (connection === 'close') {
-            if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) startBot();
+            const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+            console.log('Bağlantı kəsildi. Yenidən qoşulur...', shouldReconnect);
+            if (shouldReconnect) {
+                startBot();
+            }
         } else if (connection === 'open') {
-            console.log('✅ Bot 7/24 Aktivdir!');
+            console.log('✅ Bot WhatsApp-a UĞURLA BAĞLANDI VƏ 7/24 AKTİVDİR!');
         }
     });
 
-    sock.ev.on('messages.upsert', async (m) => {
-        const msg = m.messages[0];
-        if (!msg.message || msg.key.fromMe || msg.key.remoteJid.includes('@g.us')) return;
+    // Mesajları emal etmək
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        if (type !== 'notify') return;
 
-        const senderJid = msg.key.remoteJid;
-        const incomingText = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-        if (!incomingText) return;
+        for (const msg of messages) {
+            if (!msg.message || msg.key.fromMe) continue;
 
-        console.log(`📩 Yeni mesaj gəldi: ${incomingText}`);
+            const from = msg.key.remoteJid;
+            if (from.endsWith('@g.us')) continue; // Qruplara cavab vermir
 
-        try {
-            await sock.readMessages([msg.key]);
-            await delay(getRandomDelay(2, 4));
-            await sock.sendPresenceUpdate('composing', senderJid);
+            const userMessage = msg.message.conversation || 
+                                msg.message.extendedTextMessage?.text || '';
 
-            const aiReply = await getAIResponse(incomingText);
-            await delay(1500);
+            if (!userMessage) continue;
 
-            await sock.sendMessage(senderJid, { text: aiReply });
-            await sock.sendPresenceUpdate('paused', senderJid);
-        } catch (err) {
-            console.error("Xəta:", err);
+            console.log(`Gələn mesaj [${from}]: ${userMessage}`);
+
+            try {
+                await sock.readMessages([msg.key]);
+                await delay(Math.floor(Math.random() * 2000) + 2000);
+                await sock.sendPresenceUpdate('composing', from);
+
+                const prompt = `İstifadəçi mesajı: "${userMessage}"\n\nTəlimatlar:\n${MY_TEMPLATES}\n\nBu təlimatlara əsasən istifadəçiyə cavab yaz:`;
+                const result = await model.generateContent(prompt);
+                const replyText = result.response.text();
+
+                await sock.sendPresenceUpdate('paused', from);
+                await sock.sendMessage(from, { text: replyText });
+
+            } catch (error) {
+                console.error('Xəta:', error);
+                await sock.sendMessage(from, { text: "Salam! Müraciətiniz qəbul olundu, qısa zamanda baxılacaq." });
+            }
         }
     });
 }
