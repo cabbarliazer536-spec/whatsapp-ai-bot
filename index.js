@@ -1,3 +1,11 @@
+process.on('uncaughtException', (err) => {
+    console.error('Gözlənilməz xəta (Uncaught Exception):', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Təmin olunmamış imtina (Unhandled Rejection):', promise, 'Səbəb:', reason);
+});
+
 const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion, delay, initAuthCreds } = require('@whiskeysockets/baileys');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { MongoClient, Binary } = require('mongodb');
@@ -57,7 +65,6 @@ Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan
 Tamam , yerləşdirilib linki sizə atılacaq özünüz də baxacaqsınız, sonra ödəniş üçün məlumat göndəriləcək, təşəkkürlər.
 `;
 
-// MongoDB Binary xətasını qəti şəkildə aradan qaldıran çevirmə funksiyası
 function convertToBuffers(obj) {
     if (obj === null || obj === undefined) return obj;
     if (obj instanceof Binary || obj._bsontype === 'Binary') {
@@ -141,92 +148,96 @@ async function startBot() {
         return;
     }
 
-    const client = new MongoClient(MONGODB_URI);
-    await client.connect();
-    const db = client.db('whatsapp_bot');
-    const collection = db.collection('auth_sessions');
-    console.log('MongoDB bazasına uğurla qoşuldu!');
+    try {
+        const client = new MongoClient(MONGODB_URI, { serverSelectionTimeoutMS: 60000 });
+        await client.connect();
+        const db = client.db('whatsapp_bot');
+        const collection = db.collection('auth_sessions');
+        console.log('MongoDB bazasına uğurla qoşuldu!');
 
-    const { state, saveCreds } = await useMongoDBAuthState(collection);
-    const { version } = await fetchLatestBaileysVersion();
+        const { state, saveCreds } = await useMongoDBAuthState(collection);
+        const { version } = await fetchLatestBaileysVersion();
 
-    const sock = makeWASocket({
-        version,
-        auth: state,
-        printQRInTerminal: false,
-        browser: ["Ubuntu", "Chrome", "20.0.04"]
-    });
+        const sock = makeWASocket({
+            version,
+            auth: state,
+            printQRInTerminal: false,
+            browser: ["Ubuntu", "Chrome", "20.0.04"]
+        });
 
-    sock.ev.on('creds.update', saveCreds);
+        sock.ev.on('creds.update', saveCreds);
 
-    if (!sock.authState.creds.registered) {
-        setTimeout(async () => {
-            try {
-                let code = await sock.requestPairingCode(PHONE_NUMBER);
-                code = code?.match(/.{1,4}/g)?.join("-") || code;
-                console.log("\n==========================================");
-                console.log(`🔑 MONGODB PAIRING KODUNUZ: ${code}`);
-                console.log("==========================================\n");
-            } catch (err) {
-                console.error("Pairing code alınarkən xəta:", err);
-            }
-        }, 5000);
-    }
-
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update;
-        
-        if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('Bağlantı kəsildi. Yenidən qoşulur...', shouldReconnect);
-            if (shouldReconnect) {
-                startBot();
-            }
-        } else if (connection === 'open') {
-            console.log('✅ Bot WhatsApp-a MONGODB ÜZƏRİNDƏN UĞURLA BAĞLANDI VƏ 7/24 AKTİVDİR!');
-        }
-    });
-
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if (type !== 'notify') return;
-
-        for (const msg of messages) {
-            if (!msg.message || msg.key.fromMe) continue;
-
-            const from = msg.key.remoteJid;
-            if (from.endsWith('@g.us')) continue;
-
-            const userMessage = msg.message.conversation || 
-                                msg.message.extendedTextMessage?.text || '';
-
-            if (!userMessage) continue;
-
-            console.log(`Gələn mesaj [${from}]: ${userMessage}`);
-
-            const keywords = ["naxcars", "elan", "maşın", "masin", "avtomobil", "qiymət", "qiymet", "paylaş", "paylas"];
-            const lowerMsg = userMessage.toLowerCase();
-            const hasKeyword = keywords.some(kw => lowerMsg.includes(kw));
-
-            if (!hasKeyword) continue;
-
-            try {
-                await sock.readMessages([msg.key]);
-                await delay(Math.floor(Math.random() * 2000) + 2000);
-                await sock.sendPresenceUpdate('composing', from);
-
-                const prompt = `İstifadəçi mesajı: "${userMessage}"\n\nYuxarıdakı şablon qaydalarına əsasən bu mesaja ən uyğun olan şablonu seç və yalnız həmin şablonun mətnini qaytar:`;
-                const result = await model.generateContent(prompt);
-                const replyText = result.response.text();
-
-                await sock.sendPresenceUpdate('paused', from);
-                await sock.sendMessage(from, { text: replyText });
-
-            } catch (error) {
-                console.error('Xəta:', error);
-                await sock.sendMessage(from, { text: "Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan yazın cavablandırılacaq, təşəkkürlər." });
+        if (!sock.authState.creds.registered) {
+            setTimeout(async () => {
+                try {
+                    let code = await sock.requestPairingCode(PHONE_NUMBER);
+                    code = code?.match(/.{1,4}/g)?.join("-") || code;
+                    console.log("\n==========================================");
+                    console.log(`🔑 MONGODB PAIRING KODUNUZ: ${code}`);
+                    console.log("==========================================\n");
+                } catch (err) {
+                    console.error("Pairing code alınarkən xəta:", err);
                 }
+            }, 5000);
         }
-    });
+
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect } = update;
+            
+            if (connection === 'close') {
+                const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+                console.log('Bağlantı kəsildi. Yenidən qoşulur...', shouldReconnect);
+                if (shouldReconnect) {
+                    setTimeout(() => startBot(), 5000);
+                }
+            } else if (connection === 'open') {
+                console.log('✅ Bot WhatsApp-a MONGODB ÜZƏRİNDƏN UĞURLA BAĞLANDI VƏ 7/24 AKTİVDİR!');
+            }
+        });
+
+        sock.ev.on('messages.upsert', async ({ messages, type }) => {
+            if (type !== 'notify') return;
+
+            for (const msg of messages) {
+                if (!msg.message || msg.key.fromMe) continue;
+
+                const from = msg.key.remoteJid;
+                if (from.endsWith('@g.us')) continue;
+
+                const userMessage = msg.message.conversation || 
+                                    msg.message.extendedTextMessage?.text || '';
+
+                if (!userMessage) continue;
+
+                console.log(`Gələn mesaj [${from}]: ${userMessage}`);
+
+                const keywords = ["naxcars", "elan", "maşın", "masin", "avtomobil", "qiymət", "qiymet", "paylaş", "paylas"];
+                const lowerMsg = userMessage.toLowerCase();
+                const hasKeyword = keywords.some(kw => lowerMsg.includes(kw));
+
+                if (!hasKeyword) continue;
+
+                try {
+                    await sock.readMessages([msg.key]);
+                    await delay(Math.floor(Math.random() * 2000) + 2000);
+                    await sock.sendPresenceUpdate('composing', from);
+
+                    const prompt = `İstifadəçi mesajı: "${userMessage}"\n\nYuxarıdakı şablon qaydalarına əsasən bu mesaja ən uyğun olan şablonu seç və yalnız həmin şablonun mətnini qaytar:`;
+                    const result = await model.generateContent(prompt);
+                    const replyText = result.response.text();
+
+                    await sock.sendPresenceUpdate('paused', from);
+                    await sock.sendMessage(from, { text: replyText });
+
+                } catch (error) {
+                    console.error('Mesaj işlənərkən xəta:', error);
+                }
+            }
+        });
+    } catch (err) {
+        console.error('Bot başladılarkən xəta baş verdi, 10 saniyə sonra yenidən cəhd ediləcək:', err);
+        setTimeout(() => startBot(), 10000);
+    }
 }
 
 startBot();
