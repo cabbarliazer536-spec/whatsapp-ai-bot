@@ -13,10 +13,10 @@ http.createServer((req, res) => {
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-// Sizin WhatsApp nömrəniz
+// Sizin Azərbaycan nömrəniz
 const PHONE_NUMBER = "994554219530"; 
 
-// Sizin təyin etdiyiniz şablonlar
+// Şablonlar
 const TEMPLATE_1 = `Salam hər vaxtınız xeyir,
 🚗Avtomobilinizi bizimlə sürətli satın!
 ℹ️Naxcars Platforması olaraq sərfəli qiymətlərlə elanlarınızı paylaşa bilərik, belə ki Qiymətlər bizdə elan növünə görə dəyişir :
@@ -32,12 +32,11 @@ Saytımızda yerləşdirilən hər bir *Premium Paketli* elan müddəti bitdikd�
 Diqqətiniz üçün təşəkkürlər!`;
 
 const TEMPLATE_2 = `Salam hər vaxtınız xeyir olsun, elanı *Saytımızda , Facebookda səhifəmizdə və Maşın alqı-satqı qruplarımızda və həmçinin Telegramda elan alqı-satqı kanallarımızda* paylaşılır, avtomobilinizi bizimlə *sürətli* satın!`;
-
 const TEMPLATE_3 = `Neçə günlük istəyirsiz zəhmət olmasa qeyd edin, avtomobilin şəkillərini və haqqında məlumatı göndərin , paylaşaq.`;
-
 const TEMPLATE_4 = `Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan yazın cavablandırılacaq, təşəkkürlər.`;
-
 const TEMPLATE_7 = `Tamam , yerləşdirilib linki sizə atılacaq özünüz də baxacaqsınız, sonra ödəniş üçün məlumat göndəriləcək, təşəkkürlər.`;
+
+let isCodeRequested = false; // Kodun təkrar-təkrar istənilməsinin qarşısını alan kontrol
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
@@ -52,18 +51,22 @@ async function startBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    if (!sock.authState.creds.registered) {
+    // Qeydiyyat yoxdursa, 10 saniyə gözləyib YALNIZ 1 DƏFƏ kod tələb edir
+    if (!sock.authState.creds.registered && !isCodeRequested) {
+        isCodeRequested = true;
         setTimeout(async () => {
             try {
                 let code = await sock.requestPairingCode(PHONE_NUMBER);
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
                 console.log("\n==========================================");
-                console.log(`🔑 SİZİN PAIRING KODUNUZ: ${code}`);
+                console.log(`🔑 SİZİN SABİT PAIRING KODUNUZ: ${code}`);
+                console.log("QOŞULMAQ ÜÇÜN TƏLƏS MƏDƏN BU KODU İSTİFADƏ EDİN!");
                 console.log("==========================================\n");
             } catch (err) {
                 console.error("Pairing code alınarkən xəta:", err);
+                isCodeRequested = false; // Xəta olarsa, yenidən cəhd etməyə icazə ver
             }
-        }, 3000);
+        }, 10000); // 10 saniyə gözləmə vaxtı
     }
 
     sock.ev.on('connection.update', async (update) => {
@@ -80,7 +83,7 @@ async function startBot() {
         }
     });
 
-    // Mesajların emal edilməsi və şərtlərin yoxlanılması
+    // Mesaj cavablandırma məntiqi
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
 
@@ -88,14 +91,12 @@ async function startBot() {
             if (!msg.message || msg.key.fromMe) continue;
 
             const from = msg.key.remoteJid;
-            if (from.endsWith('@g.us')) continue; // Qrupları nəzərə almır
+            if (from.endsWith('@g.us')) continue;
 
             const userMessage = (msg.message.conversation || 
                                 msg.message.extendedTextMessage?.text || '').trim();
 
             if (!userMessage) continue;
-
-            console.log(`Gələn mesaj [${from}]: ${userMessage}`);
 
             try {
                 await sock.readMessages([msg.key]);
@@ -105,24 +106,19 @@ async function startBot() {
                 let replyText = "";
                 const lowerMsg = userMessage.toLowerCase();
 
-                // 1. Əgər mesaj yalnız "?" işarəsidirsə -> Şablon 4
                 if (userMessage === "?") {
                     replyText = TEMPLATE_4;
                 }
-                // 2. Əgər mesajda avtomobil adı/markası, ili və ya şəkil/məlumat xarakterli sözlər varsa -> Şablon 7
                 else if (lowerMsg.includes("il") && (lowerMsg.includes("qiymət") || lowerMsg.includes("satıram") || lowerMsg.includes("şəkil") || lowerMsg.includes("məlumat"))) {
                     replyText = TEMPLATE_7;
                 }
-                // 3. Əgər gələn mesajda "Naxcars", "elan", "maşın", "avtomobil", "qiymət" və ya "paylaş" sözləri varsa -> Şablon 1, 2 və 3-ü ardıcıl göndər
                 else if (lowerMsg.includes("naxcars") || lowerMsg.includes("elan") || lowerMsg.includes("maşın") || lowerMsg.includes("avtomobil") || lowerMsg.includes("qiymət") || lowerMsg.includes("paylaş")) {
-                    // Şablon 1, 2 və 3-ü birgə və ya ardıcıl göndəririk
                     await sock.sendMessage(from, { text: TEMPLATE_1 });
                     await delay(1500);
                     await sock.sendMessage(from, { text: TEMPLATE_2 });
                     await delay(1500);
                     replyText = TEMPLATE_3;
                 } 
-                // 4. Digər ümumi suallar üçün Gemini AI vasitəsilə cavab vermək
                 else {
                     const prompt = `İstifadəçi mesajı: "${userMessage}"\n\nBu Naxcars avtomobil elanları platformasının köməkçisiyik. İstifadəçiyə qısa və nəzakətli cavab yaz.`;
                     const result = model.generateContent(prompt);
