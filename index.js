@@ -1,5 +1,6 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, delay } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion, delay, initAuthCreds } = require('@whiskeysockets/baileys');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { MongoClient } = require('mongodb');
 const http = require('http');
 
 // Render üçün HTTP Server (Port 10000)
@@ -13,17 +14,16 @@ http.createServer((req, res) => {
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-// Sizin Azərbaycan nömrəniz
 const PHONE_NUMBER = "994554219530"; 
+const MONGODB_URI = process.env.MONGODB_URI;
 
-// Sizin təyin etdiyiniz rəsmi şablonlar və qaydalar
 const MY_TEMPLATES = `
 Sən "Naxcars" avtomobil elanları platformasının rəsmi WhatsApp köməkçisisən. 
-VACİB QAYDA: Bot yalnız "Naxcars", "elan", "maşın", "avtomobil", "qiymət" və "paylaş" ifadələri və ya bu mövzulardakı mesajlara cavab verəcək. Əgər mesaj bu mövzulardan kənardadırsa, qısa şəkildə 4-cü şablonu cavab olaraq ver.
+VACİB QAYDA: Bot yalnız "Naxcars", "elan", "maşın", "avtomobil", "qiymət" və "paylaş" ifadələri və ya bu mövzulardakı mesajlara cavab verəcək. Əgər mesaj bu mövzulardan kənardadırsa, 4-cü şablonu cavab olaraq ver.
 
-İstifadəçinin mesajına və növünə uyğun olaraq aşağıdakı 7 rəsmi şablondan **yalnız birini** (ən uyğun olanını) seç və dəqiq şəkildə həmin şablonu cavab olaraq yaz (özündən əlavə mətn qatma):
+İstifadəçinin mesajına uyğun olaraq aşağıdakı 7 şablondan yalnız ən uyğun olanını seç və tam olaraq həmin şablonu cavab olaraq yaz:
 
-ŞABLON 1 (Qiymətlər, paketlər, hədiyyə və sayt linki haqqında ümumi məlumat):
+ŞABLON 1 (Qiymətlər, paketlər və sayt linki):
 Salam hər vaxtınız xeyir,
 🚗Avtomobilinizi bizimlə sürətli satın!
 ℹ️Naxcars Platforması olaraq sərfəli qiymətlərlə elanlarınızı paylaşa bilərik, belə ki Qiymətlər bizdə elan növünə görə dəyişir :
@@ -38,7 +38,7 @@ Saytımızda yerləşdirilən hər bir *Premium Paketli* elan müddəti bitdikd�
 ↪️https://naxcarspltfrm.base44.app/
 Diqqətiniz üçün təşəkkürlər!
 
-ŞABLON 2 (Elanın harada paylaşılacağı haqqında məlumat):
+ŞABLON 2 (Elanın harada paylaşılacağı):
 Salam hər vaxtınız xeyir olsun, elanı *Saytımızda , Facebookda səhifəmizdə və Maşın alqı-satqı qruplarımızda və həmçinin Telegramda elan alqı-satqı kanallarımızda* paylaşılır, avtomobilinizi bizimlə *sürətli* satın!
 
 ŞABLON 3 (Məlumat və şəkil istəyi):
@@ -50,15 +50,79 @@ Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan
 ŞABLON 5 (Ödənişin təsdiqi):
 ✅️Ödəniş təsdiqləndi, təşəkkürlər!
 
-ŞABLON 6 (Ödəniş xatırlatması / Xəbərdarlıq):
+ŞABLON 6 (Ödəniş xatırlatması):
 ⚠️DİQQƏT! XATIRLATMA! Elan ödənişi edilmədiyi təqdirdə gün sonunda 00:00'da elanınız platformalardan silinəcəkdir!
 
-ŞABLON 7 (Elanın yerləşdirilməsi və ödəniş məlumatı):
+ŞABLON 7 (Yerləşdirmə və ödəniş məlumatı):
 Tamam , yerləşdirilib linki sizə atılacaq özünüz də baxacaqsınız, sonra ödəniş üçün məlumat göndəriləcək, təşəkkürlər.
 `;
 
+async function useMongoDBAuthState(collection) {
+    const writeData = async (data, id) => {
+        await collection.updateOne({ _id: id }, { $set: { data } }, { upsert: true });
+    };
+    const readData = async (id) => {
+        try {
+            const doc = await collection.findOne({ _id: id });
+            return doc ? doc.data : null;
+        } catch {
+            return null;
+        }
+    };
+    const removeData = async (id) => {
+        try { await collection.deleteOne({ _id: id }); } catch {}
+    };
+
+    const creds = await readData('creds') || initAuthCreds();
+
+    return {
+        state: {
+            creds,
+            keys: {
+                get: async (type, ids) => {
+                    const data = {};
+                    for (const id of ids) {
+                        let value = await readData(`${type}-${id}`);
+                        data[id] = value;
+                    }
+                    return data;
+                },
+                set: async (data) => {
+                    const tasks = [];
+                    for (const category of Object.keys(data)) {
+                        for (const id of Object.keys(data[category])) {
+                            const value = data[category][id];
+                            const key = `${category}-${id}`;
+                            if (value) {
+                                tasks.push(writeData(value, key));
+                            } else {
+                                tasks.push(removeData(key));
+                            }
+                        }
+                    }
+                    await Promise.all(tasks);
+                }
+            }
+        },
+        saveCreds: async () => {
+            await writeData(state.creds, 'creds');
+        }
+    };
+}
+
 async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    if (!MONGODB_URI) {
+        console.error("MONGODB_URI tapılmadı! Render Environment variables bölməsini yoxlayın.");
+        return;
+    }
+
+    const client = new MongoClient(MONGODB_URI);
+    await client.connect();
+    const db = client.db('whatsapp_bot');
+    const collection = db.collection('auth_sessions');
+    console.log('MongoDB bazasına uğurla qoşuldu!');
+
+    const { state, saveCreds } = await useMongoDBAuthState(collection);
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
@@ -76,12 +140,12 @@ async function startBot() {
                 let code = await sock.requestPairingCode(PHONE_NUMBER);
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
                 console.log("\n==========================================");
-                console.log(`🔑 SİZİN PAIRING KODUNUZ: ${code}`);
+                console.log(`🔑 MONGODB PAIRING KODUNUZ: ${code}`);
                 console.log("==========================================\n");
             } catch (err) {
                 console.error("Pairing code alınarkən xəta:", err);
             }
-        }, 3000);
+        }, 4000);
     }
 
     sock.ev.on('connection.update', async (update) => {
@@ -94,11 +158,10 @@ async function startBot() {
                 startBot();
             }
         } else if (connection === 'open') {
-            console.log('✅ Bot WhatsApp-a UĞURLA BAĞLANDI VƏ 7/24 AKTİVDİR!');
+            console.log('✅ Bot WhatsApp-a MONGODB ÜZƏRİNDƏN UĞURLA BAĞLANDI VƏ 7/24 AKTİVDİR!');
         }
     });
 
-    // Mesajların emal edilməsi
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
 
@@ -106,7 +169,7 @@ async function startBot() {
             if (!msg.message || msg.key.fromMe) continue;
 
             const from = msg.key.remoteJid;
-            if (from.endsWith('@g.us')) continue; // Qrupları nəzərə almır
+            if (from.endsWith('@g.us')) continue;
 
             const userMessage = msg.message.conversation || 
                                 msg.message.extendedTextMessage?.text || '';
@@ -115,16 +178,11 @@ async function startBot() {
 
             console.log(`Gələn mesaj [${from}]: ${userMessage}`);
 
-            // Açar söz yoxlaması (Naxcars, elan, maşın, avtomobil, qiymət, paylaş)
             const keywords = ["naxcars", "elan", "maşın", "masin", "avtomobil", "qiymət", "qiymet", "paylaş", "paylas"];
             const lowerMsg = userMessage.toLowerCase();
             const hasKeyword = keywords.some(kw => lowerMsg.includes(kw));
 
-            // Əgər mesajda bu açar sözlərdən heç biri yoxdursa, bot cavab verməsin
-            if (!hasKeyword) {
-                console.log("Mesaj tələb olunan açar sözləri ehtiva etmədiyi üçün cavab verilmədi.");
-                continue;
-            }
+            if (!hasKeyword) continue;
 
             try {
                 await sock.readMessages([msg.key]);
