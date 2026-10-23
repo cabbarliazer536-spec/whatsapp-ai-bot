@@ -1,62 +1,12 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, delay } = require('@whiskeysockets/baileys');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const http = require('http');
+const url = require('url');
 
 const PORT = process.env.PORT || 10000;
-let currentPairingCode = "Gözlənilir... (Zəhmət olmasa bir az gözləyin)";
-
-// Render Veb səhifəsi və Kopyala düyməsi
-http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(`
-        <!DOCTYPE html>
-        <html lang="az">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Naxcars WhatsApp Bot</title>
-            <style>
-                body { font-family: Arial, sans-serif; text-align: center; padding: 40px 20px; background: #0f172a; color: #f8fafc; }
-                .card { background: #1e293b; padding: 25px; border-radius: 12px; display: inline-block; max-width: 400px; width: 100%; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-                h2 { color: #38bdf8; margin-bottom: 10px; }
-                p { color: #94a3b8; font-size: 14px; }
-                .code-box { font-size: 28px; font-weight: bold; background: #334155; padding: 15px; border-radius: 8px; margin: 20px 0; letter-spacing: 2px; color: #4ade80; word-break: break-all; }
-                button { background: #22c55e; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; }
-                button:hover { background: #16a34a; }
-                .msg { margin-top: 15px; color: #fbbf24; font-size: 14px; font-weight: bold; }
-            </style>
-        </head>
-        <body>
-            <div class="card">
-                <h2>Naxcars WhatsApp Bot</h2>
-                <p>Aşağıdakı təsdiq kodunu kopyalayıb WhatsApp-a daxil edin:</p>
-                <div class="code-box" id="codeText">${currentPairingCode}</div>
-                <button onclick="copyCode()">📋 Kodu Panoya Kopyala</button>
-                <div class="msg" id="msg"></div>
-            </div>
-            <script>
-                function copyCode() {
-                    const code = document.getElementById('codeText').innerText;
-                    if(code.includes("Gözlənilir")) {
-                        alert("Hələ kod yaradılmayıb, səhifəni yeniləyin!");
-                        return;
-                    }
-                    navigator.clipboard.writeText(code).then(() => {
-                        document.getElementById('msg').innerText = '✅ Kod panoya kopyalandı!';
-                        setTimeout(() => document.getElementById('msg').innerText = '', 3000);
-                    }).catch(err => {
-                        alert('Xəta: ' + err);
-                    });
-                }
-                // Kod hələ gəlməyibsə, səhifəni hər 4 saniyədən bir avtomatik yenilə
-                if(document.getElementById('codeText').includes("Gözlənilir")) {
-                    setTimeout(() => location.reload(), 4000);
-                }
-            </script>
-        </body>
-        </html>
-    `);
-}).listen(PORT, () => console.log(`Server listening on port ${PORT}`));
+let sock = null;
+let currentPairingCode = "Hələ yaradılmayıb. Aşağıdakı düyməni basın.";
+let isConnected = false;
 
 // Gemini AI Setup
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -84,13 +34,11 @@ const TEMPLATE_3 = `Neçə günlük istəyirsiz zəhmət olmasa qeyd edin, avtom
 const TEMPLATE_4 = `Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan yazın cavablandırılacaq, təşəkkürlər.`;
 const TEMPLATE_7 = `Tamam , yerləşdirilib linki sizə atılacaq özünüz də baxacaqsınız, sonra ödəniş üçün məlumat göndəriləcək, təşəkkürlər.`;
 
-let isGeneratingCode = false;
-
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
 
-    const sock = makeWASocket({
+    sock = makeWASocket({
         version,
         auth: state,
         printQRInTerminal: false,
@@ -102,32 +50,16 @@ async function startBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    if (!sock.authState.creds.registered && !isGeneratingCode) {
-        isGeneratingCode = true;
-        setTimeout(async () => {
-            try {
-                let code = await sock.requestPairingCode(PHONE_NUMBER);
-                code = code?.match(/.{1,4}/g)?.join("-") || code;
-                currentPairingCode = code; // Kodu veb səhifə üçün yadda saxlayırıq
-                console.log(`\n🔑 PAIRING KODU YARADILDI: ${code}\n`);
-            } catch (err) {
-                console.error("Pairing code xətası:", err);
-                isGeneratingCode = false;
-            }
-        }, 3000);
-    }
-
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
+            isConnected = false;
             const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) {
-                setTimeout(() => {
-                    isGeneratingCode = false;
-                    startBot();
-                }, 5000);
+                setTimeout(() => startBot(), 5000);
             }
         } else if (connection === 'open') {
+            isConnected = true;
             currentPairingCode = "✅ Uğurla Qoşuldu!";
             console.log('✅ BOT UĞURLA QOŞULDU VƏ AKTİVDİR!');
         }
@@ -186,5 +118,88 @@ async function startBot() {
         }
     });
 }
+
+// Veb Panel və On-Demand Kod İstəyi
+http.createServer(async (req, res) => {
+    const parsedUrl = url.parse(req.url, true);
+    
+    if (parsedUrl.pathname === '/generate-code' && sock && !isConnected) {
+        try {
+            let code = await sock.requestPairingCode(PHONE_NUMBER);
+            code = code?.match(/.{1,4}/g)?.join("-") || code;
+            currentPairingCode = code;
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: true, code: code }));
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+        return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(`
+        <!DOCTYPE html>
+        <html lang="az">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Naxcars WhatsApp Bot - Panel</title>
+            <style>
+                body { font-family: Arial, sans-serif; text-align: center; padding: 40px 20px; background: #0f172a; color: #f8fafc; }
+                .card { background: #1e293b; padding: 25px; border-radius: 12px; display: inline-block; max-width: 400px; width: 100%; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+                h2 { color: #38bdf8; margin-bottom: 10px; }
+                p { color: #94a3b8; font-size: 14px; }
+                .code-box { font-size: 26px; font-weight: bold; background: #334155; padding: 15px; border-radius: 8px; margin: 20px 0; letter-spacing: 2px; color: #4ade80; word-break: break-all; }
+                .btn-primary { background: #38bdf8; color: #0f172a; border: none; padding: 12px 20px; font-size: 16px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; margin-bottom: 10px; }
+                .btn-primary:hover { background: #0ea5e9; }
+                .btn-success { background: #22c55e; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; }
+                .btn-success:hover { background: #16a34a; }
+                .msg { margin-top: 15px; color: #fbbf24; font-size: 14px; font-weight: bold; }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <h2>Naxcars WhatsApp Bot</h2>
+                <p>Gecikməni aradan qaldırmaq üçün əvvəlcə düyməni sıxıb təzə kod yaradın:</p>
+                <button class="btn-primary" onclick="generateCode()">🔄 Yeni Kod Al</button>
+                <div class="code-box" id="codeText">${currentPairingCode}</div>
+                <button class="btn-success" onclick="copyCode()">📋 Kodu Panoya Kopyala</button>
+                <div class="msg" id="msg"></div>
+            </div>
+            <script>
+                async function generateCode() {
+                    document.getElementById('msg').innerText = '⏳ Kod yaradılır, gözləyin...';
+                    try {
+                        const res = await fetch('/generate-code');
+                        const data = await res.json();
+                        if(data.success) {
+                            document.getElementById('codeText').innerText = data.code;
+                            document.getElementById('msg').innerText = '✅ Yeni kod uğurla yaradıldı!';
+                        } else {
+                            document.getElementById('msg').innerText = '❌ Xəta baş verdi, yenidən sınayın.';
+                        }
+                    } catch(e) {
+                        document.getElementById('msg').innerText = '❌ Bağlantı xətası!';
+                    }
+                }
+                function copyCode() {
+                    const code = document.getElementById('codeText').innerText;
+                    if(code.includes("Hələ") || code.includes("Uğurla")) {
+                        alert("Əvvəlcə 'Yeni Kod Al' düyməsinə basın!");
+                        return;
+                    }
+                    navigator.clipboard.writeText(code).then(() => {
+                        document.getElementById('msg').innerText = '✅ Kod panoya kopyalandı!';
+                        setTimeout(() => document.getElementById('msg').innerText = '', 3000);
+                    }).catch(err => {
+                        alert('Xəta: ' + err);
+                    });
+                }
+            </script>
+        </body>
+        </html>
+    `);
+}).listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 
 startBot();
