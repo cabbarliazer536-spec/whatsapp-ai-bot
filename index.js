@@ -13,7 +13,6 @@ http.createServer((req, res) => {
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-// Sizin Azərbaycan nömrəniz
 const PHONE_NUMBER = "994554219530"; 
 
 // Şablonlar
@@ -36,8 +35,6 @@ const TEMPLATE_3 = `Neçə günlük istəyirsiz zəhmət olmasa qeyd edin, avtom
 const TEMPLATE_4 = `Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan yazın cavablandırılacaq, təşəkkürlər.`;
 const TEMPLATE_7 = `Tamam , yerləşdirilib linki sizə atılacaq özünüz də baxacaqsınız, sonra ödəniş üçün məlumat göndəriləcək, təşəkkürlər.`;
 
-let isCodeRequested = false; // Kodun təkrar-təkrar istənilməsinin qarşısını alan kontrol
-
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
@@ -51,22 +48,24 @@ async function startBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Qeydiyyat yoxdursa, 10 saniyə gözləyib YALNIZ 1 DƏFƏ kod tələb edir
-    if (!sock.authState.creds.registered && !isCodeRequested) {
-        isCodeRequested = true;
+    // Bağlı deyilsə, dərhal əmr gözləyirik
+    if (!sock.authState.creds.registered) {
+        console.log("\n==========================================");
+        console.log("ℹ️ BOT HAZIRDIR! Pairing Kodu almaq üçün Render-də 'Manual Deploy' edin və ya 5 saniyə gözləyin...");
+        console.log("==========================================\n");
+
+        // 5 saniyə sonra təmiz kod yaradırıq
         setTimeout(async () => {
             try {
                 let code = await sock.requestPairingCode(PHONE_NUMBER);
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
                 console.log("\n==========================================");
-                console.log(`🔑 SİZİN SABİT PAIRING KODUNUZ: ${code}`);
-                console.log("QOŞULMAQ ÜÇÜN TƏLƏS MƏDƏN BU KODU İSTİFADƏ EDİN!");
+                console.log(`🔑 YENİ VƏ TƏZƏ PAIRING KODUNUZ: ${code}`);
                 console.log("==========================================\n");
             } catch (err) {
                 console.error("Pairing code alınarkən xəta:", err);
-                isCodeRequested = false; // Xəta olarsa, yenidən cəhd etməyə icazə ver
             }
-        }, 10000); // 10 saniyə gözləmə vaxtı
+        }, 5000);
     }
 
     sock.ev.on('connection.update', async (update) => {
@@ -83,7 +82,7 @@ async function startBot() {
         }
     });
 
-    // Mesaj cavablandırma məntiqi
+    // Mesajlaşma məntiqi
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
 
