@@ -1,4 +1,5 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, delay } = require('@whiskeysockets/baileys');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const http = require('http');
 
 // Render üçün HTTP Server (Port 10000)
@@ -8,13 +9,22 @@ http.createServer((req, res) => {
     res.end('WhatsApp Bot Server Alive!');
 }).listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 
-// Sizin nömrəniz
+// Gemini AI Setup
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+// Sizin Azərbaycan nömrəniz
 const PHONE_NUMBER = "994554219530"; 
 
-// NAXCARDS RƏSMİ ŞABLONLARI
-const TEMPLATES = {
-    // 1. Qiymətlər, paketlər və ümumi məlumat
-    pricing: `Salam hər vaxtınız xeyir,
+// Sizin təyin etdiyiniz rəsmi şablonlar və qaydalar
+const MY_TEMPLATES = `
+Sən "Naxcars" avtomobil elanları platformasının rəsmi WhatsApp köməkçisisən. 
+VACİB QAYDA: Bot yalnız "Naxcars", "elan", "maşın", "avtomobil", "qiymət" və "paylaş" ifadələri və ya bu mövzulardakı mesajlara cavab verəcək. Əgər mesaj bu mövzulardan kənardadırsa, qısa şəkildə 4-cü şablonu cavab olaraq ver.
+
+İstifadəçinin mesajına və növünə uyğun olaraq aşağıdakı 7 rəsmi şablondan **yalnız birini** (ən uyğun olanını) seç və dəqiq şəkildə həmin şablonu cavab olaraq yaz (özündən əlavə mətn qatma):
+
+ŞABLON 1 (Qiymətlər, paketlər, hədiyyə və sayt linki haqqında ümumi məlumat):
+Salam hər vaxtınız xeyir,
 🚗Avtomobilinizi bizimlə sürətli satın!
 ℹ️Naxcars Platforması olaraq sərfəli qiymətlərlə elanlarınızı paylaşa bilərik, belə ki Qiymətlər bizdə elan növünə görə dəyişir :
 ℹ️ELAN PAKETLƏRİMİZ:
@@ -26,53 +36,26 @@ Elanlar saytda VIP, Premium və Standart ardıcıllığı ilə sıralanır.
 Saytımızda yerləşdirilən hər bir *Premium Paketli* elan müddəti bitdikdən sonra *VİP Paketli* elan növü olaraq *əlavə hədiyyə müddəti* qazanır.
 🌍✅️Saytımız İnternet üzərindən qlobal axtarış sistemlərinə tam inteqrasiya olunub! Google və digər brauzerlərdə sadəcə "Naxcars" yazaraq axtarış edib, baxa bilərsiniz.Məlumat üçün:
 ↪️https://naxcarspltfrm.base44.app/
-Diqqətiniz üçün təşəkkürlər!`,
+Diqqətiniz üçün təşəkkürlər!
 
-    // 2. Elanın harada paylaşılacağı
-    sharing: `Salam hər vaxtınız xeyir olsun, elanı *Saytımızda , Facebookda səhifəmizdə və Maşın alqı-satqı qruplarımızda və həmçinin Telegramda elan alqı-satqı kanallarımızda* paylaşılır, avtomobilinizi bizimlə *sürətli* satın!`,
+ŞABLON 2 (Elanın harada paylaşılacağı haqqında məlumat):
+Salam hər vaxtınız xeyir olsun, elanı *Saytımızda , Facebookda səhifəmizdə və Maşın alqı-satqı qruplarımızda və həmçinin Telegramda elan alqı-satqı kanallarımızda* paylaşılır, avtomobilinizi bizimlə *sürətli* satın!
 
-    // 3. Elan yerləşdirmək / şəkil istəmək
-    posting: `Neçə günlük istəyirsiz zəhmət olmasa qeyd edin, avtomobilin şəkillərini və haqqında məlumatı göndərin , paylaşaq.`,
+ŞABLON 3 (Məlumat və şəkil istəyi):
+Neçə günlük istəyirsiz zəhmət olmasa qeyd edin, avtomobilin şəkillərini və haqqında məlumatı göndərin , paylaşaq.
 
-    // 4. Əlavə suallar üçün cavab
-    defaultAnswer: `Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan yazın cavablandırılacaq, təşəkkürlər.`,
+ŞABLON 4 (Əlavə suallar üçün):
+Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan yazın cavablandırılacaq, təşəkkürlər.
 
-    // 5. Ödəniş təsdiqi
-    paymentConfirmed: `✅️Ödəniş təsdiqləndi, təşəkkürlər!`,
+ŞABLON 5 (Ödənişin təsdiqi):
+✅️Ödəniş təsdiqləndi, təşəkkürlər!
 
-    // 6. Ödəniş xatırlatması
-    paymentReminder: `⚠️DİQQƏT! XATIRLATMA! Elan ödənişi edilmədiyi təqdirdə gün sonunda 00:00'da elanınız platformalardan silinəcəkdir!`,
+ŞABLON 6 (Ödəniş xatırlatması / Xəbərdarlıq):
+⚠️DİQQƏT! XATIRLATMA! Elan ödənişi edilmədiyi təqdirdə gün sonunda 00:00'da elanınız platformalardan silinəcəkdir!
 
-    // 7. Link gözləyənlərə
-    linkReady: `Tamam , yerləşdirilib linki sizə atılacaq özünüz də baxacaqsınız, sonra ödəniş üçün məlumat göndəriləcək, təşəkkürlər.`
-};
-
-// Gələn mesaja görə uyğun şablonu seçən funksiya
-function getReply(message) {
-    const text = message.toLowerCase();
-
-    if (text.includes('qiymət') || text.includes('paket') || text.includes('standart') || text.includes('premium') || text.includes('vip') || text.includes('sayt') || text.includes('link') || text.includes('neçə')) {
-        return TEMPLATES.pricing;
-    }
-    if (text.includes('hara') || text.includes('facebook') || text.includes('telegram') || text.includes('qrup') || text.includes('paylaşılır')) {
-        return TEMPLATES.sharing;
-    }
-    if (text.includes('elan') || text.includes('satmaq') || text.includes('şəkil') || text.includes('göndərim') || text.includes('yerləşdirmək')) {
-        return TEMPLATES.posting;
-    }
-    if (text.includes('ödədim') || text.includes('ödəniş etdim') || text.includes('pulu göndərdim')) {
-        return TEMPLATES.paymentConfirmed;
-    }
-    if (text.includes('xatırlat') || text.includes('silinəcək') || text.includes('vaxtı bitir')) {
-        return TEMPLATES.paymentReminder;
-    }
-    if (text.includes('hazırdır') || text.includes('yerləşdirilib') || text.includes('baxdım')) {
-        return TEMPLATES.linkReady;
-    }
-
-    // Əgər uyğun açar söz tapılmazsa standart cavab qayıtsın
-    return TEMPLATES.defaultAnswer;
-}
+ŞABLON 7 (Elanın yerləşdirilməsi və ödəniş məlumatı):
+Tamam , yerləşdirilib linki sizə atılacaq özünüz də baxacaqsınız, sonra ödəniş üçün məlumat göndəriləcək, təşəkkürlər.
+`;
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
@@ -93,12 +76,12 @@ async function startBot() {
                 let code = await sock.requestPairingCode(PHONE_NUMBER);
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
                 console.log("\n==========================================");
-                console.log(`🔑 SİZİN TƏSDİQ KODUNUZ: ${code}`);
+                console.log(`🔑 SİZİN PAIRING KODUNUZ: ${code}`);
                 console.log("==========================================\n");
             } catch (err) {
-                console.error("Pairing code xətası:", err);
+                console.error("Pairing code alınarkən xəta:", err);
             }
-        }, 5000);
+        }, 3000);
     }
 
     sock.ev.on('connection.update', async (update) => {
@@ -115,6 +98,7 @@ async function startBot() {
         }
     });
 
+    // Mesajların emal edilməsi
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
 
@@ -122,7 +106,7 @@ async function startBot() {
             if (!msg.message || msg.key.fromMe) continue;
 
             const from = msg.key.remoteJid;
-            if (from.endsWith('@g.us')) continue; 
+            if (from.endsWith('@g.us')) continue; // Qrupları nəzərə almır
 
             const userMessage = msg.message.conversation || 
                                 msg.message.extendedTextMessage?.text || '';
@@ -131,19 +115,32 @@ async function startBot() {
 
             console.log(`Gələn mesaj [${from}]: ${userMessage}`);
 
+            // Açar söz yoxlaması (Naxcars, elan, maşın, avtomobil, qiymət, paylaş)
+            const keywords = ["naxcars", "elan", "maşın", "masin", "avtomobil", "qiymət", "qiymet", "paylaş", "paylas"];
+            const lowerMsg = userMessage.toLowerCase();
+            const hasKeyword = keywords.some(kw => lowerMsg.includes(kw));
+
+            // Əgər mesajda bu açar sözlərdən heç biri yoxdursa, bot cavab verməsin
+            if (!hasKeyword) {
+                console.log("Mesaj tələb olunan açar sözləri ehtiva etmədiyi üçün cavab verilmədi.");
+                continue;
+            }
+
             try {
                 await sock.readMessages([msg.key]);
-                await delay(1500);
+                await delay(Math.floor(Math.random() * 2000) + 2000);
                 await sock.sendPresenceUpdate('composing', from);
 
-                // Birbaşa sizin şablonlardan cavab seçilir
-                const replyText = getReply(userMessage);
+                const prompt = `İstifadəçi mesajı: "${userMessage}"\n\nYuxarıdakı şablon qaydalarına əsasən bu mesaja ən uyğun olan şablonu seç və yalnız həmin şablonun mətnini qaytar:`;
+                const result = await model.generateContent(prompt);
+                const replyText = result.response.text();
 
                 await sock.sendPresenceUpdate('paused', from);
                 await sock.sendMessage(from, { text: replyText });
 
             } catch (error) {
-                console.error('Mesaj göndərilərkən xəta:', error);
+                console.error('Xəta:', error);
+                await sock.sendMessage(from, { text: "Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan yazın cavablandırılacaq, təşəkkürlər." });
             }
         }
     });
