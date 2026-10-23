@@ -35,23 +35,29 @@ const TEMPLATE_3 = `Neçə günlük istəyirsiz zəhmət olmasa qeyd edin, avtom
 const TEMPLATE_4 = `Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan yazın cavablandırılacaq, təşəkkürlər.`;
 const TEMPLATE_7 = `Tamam , yerləşdirilib linki sizə atılacaq özünüz də baxacaqsınız, sonra ödəniş üçün məlumat göndəriləcək, təşəkkürlər.`;
 
+let isGeneratingCode = false;
+
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
 
-    // BRAUZER ƏVƏZİNƏ ANDROID CİHAZ KİMİ QOŞULUR (WhatsApp bu kodu daha uzun müddət saxlayır)
     const sock = makeWASocket({
         version,
         auth: state,
         printQRInTerminal: false,
-        browser: ["Android", "Chrome", "220.0.0"]
+        // Kodun vaxtının keçməməsi üçün rəsmi Chrome masaüstü profili
+        browser: ["Mac OS", "Chrome", "121.0.6167.160"],
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 60000,
+        keepAliveIntervalMs: 30000
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    if (!sock.authState.creds.registered) {
+    if (!sock.authState.creds.registered && !isGeneratingCode) {
+        isGeneratingCode = true;
         console.log("\n==========================================");
-        console.log("ℹ️ ANDROID REJİMİNDƏ HAZIRDIR! 7 saniyə sonra kod yaradılacaq...");
+        console.log("⏳ SEANS BAŞLADILIR: 3 saniyə sonra kod yaradılacaq...");
         console.log("==========================================\n");
 
         setTimeout(async () => {
@@ -59,30 +65,36 @@ async function startBot() {
                 let code = await sock.requestPairingCode(PHONE_NUMBER);
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
                 console.log("\n==========================================");
-                console.log(`🔑 ANDROID PAIRING KODUNUZ: ${code}`);
-                console.log("BU KOD DAHA UZUN MÜDDƏT QÜVVƏDƏ QALACAQ!");
+                console.log(`🔑 SİZİN PAIRING KODUNUZ: ${code}`);
+                console.log("⚠️ BU KOD NÖVBƏTİ 2 DƏQİQƏ ƏRZİNDƏ İŞLƏK OLACAQ!");
                 console.log("==========================================\n");
             } catch (err) {
-                console.error("Pairing code alınarkən xəta:", err);
+                console.error("Pairing code xətası:", err);
+                isGeneratingCode = false;
             }
-        }, 7000);
+        }, 3000);
     }
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
         
         if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+            const statusCode = (lastDisconnect?.error)?.output?.statusCode;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
             console.log('Bağlantı kəsildi. Yenidən qoşulur...', shouldReconnect);
+            
+            // Əgər kod səhv yazılıbsa və ya qoşulma pozulubsa, 5 saniyə gözləyib yenidən daxil olur
             if (shouldReconnect) {
-                startBot();
+                setTimeout(() => {
+                    isGeneratingCode = false;
+                    startBot();
+                }, 5000);
             }
         } else if (connection === 'open') {
-            console.log('✅ Bot WhatsApp-a UĞURLA BAĞLANDI VƏ 7/24 AKTİVDİR!');
+            console.log('✅ BOT UĞURLA QOŞULDU VƏ AKTİVDİR!');
         }
     });
 
-    // Mesajlaşma məntiqi
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
 
@@ -99,7 +111,7 @@ async function startBot() {
 
             try {
                 await sock.readMessages([msg.key]);
-                await delay(Math.floor(Math.random() * 1000) + 1000);
+                await delay(1500);
                 await sock.sendPresenceUpdate('composing', from);
 
                 let replyText = "";
