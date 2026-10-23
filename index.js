@@ -39,33 +39,33 @@ async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
 
+    // BRAUZER ƏVƏZİNƏ ANDROID CİHAZ KİMİ QOŞULUR (WhatsApp bu kodu daha uzun müddət saxlayır)
     const sock = makeWASocket({
         version,
         auth: state,
         printQRInTerminal: false,
-        browser: ["Ubuntu", "Chrome", "20.0.04"]
+        browser: ["Android", "Chrome", "220.0.0"]
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Bağlı deyilsə, dərhal əmr gözləyirik
     if (!sock.authState.creds.registered) {
         console.log("\n==========================================");
-        console.log("ℹ️ BOT HAZIRDIR! Pairing Kodu almaq üçün Render-də 'Manual Deploy' edin və ya 5 saniyə gözləyin...");
+        console.log("ℹ️ ANDROID REJİMİNDƏ HAZIRDIR! 7 saniyə sonra kod yaradılacaq...");
         console.log("==========================================\n");
 
-        // 5 saniyə sonra təmiz kod yaradırıq
         setTimeout(async () => {
             try {
                 let code = await sock.requestPairingCode(PHONE_NUMBER);
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
                 console.log("\n==========================================");
-                console.log(`🔑 YENİ VƏ TƏZƏ PAIRING KODUNUZ: ${code}`);
+                console.log(`🔑 ANDROID PAIRING KODUNUZ: ${code}`);
+                console.log("BU KOD DAHA UZUN MÜDDƏT QÜVVƏDƏ QALACAQ!");
                 console.log("==========================================\n");
             } catch (err) {
                 console.error("Pairing code alınarkən xəta:", err);
             }
-        }, 5000);
+        }, 7000);
     }
 
     sock.ev.on('connection.update', async (update) => {
