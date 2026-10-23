@@ -1,6 +1,6 @@
 const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion, delay, initAuthCreds } = require('@whiskeysockets/baileys');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { MongoClient } = require('mongodb');
+const { MongoClient, Binary } = require('mongodb');
 const http = require('http');
 
 // Render üçün HTTP Server (Port 10000)
@@ -57,35 +57,36 @@ Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan
 Tamam , yerləşdirilib linki sizə atılacaq özünüz də baxacaqsınız, sonra ödəniş üçün məlumat göndəriləcək, təşəkkürlər.
 `;
 
-// MongoDB Binary xətasını aradan qaldıran xüsusi autentifikasiya funksiyası
+// MongoDB Binary xətasını qəti şəkildə aradan qaldıran çevirmə funksiyası
+function convertToBuffers(obj) {
+    if (obj === null || obj === undefined) return obj;
+    if (obj instanceof Binary || obj._bsontype === 'Binary') {
+        return Buffer.from(obj.buffer);
+    }
+    if (Buffer.isBuffer(obj)) return obj;
+    if (typeof obj === 'object') {
+        if (Array.isArray(obj)) {
+            return obj.map(convertToBuffers);
+        }
+        const clone = {};
+        for (const key of Object.keys(obj)) {
+            clone[key] = convertToBuffers(obj[key]);
+        }
+        return clone;
+    }
+    return obj;
+}
+
 async function useMongoDBAuthState(collection) {
     const writeData = async (data, id) => {
-        const stringified = JSON.stringify(data, (k, val) => {
-            if (Buffer.isBuffer(val)) {
-                return { type: 'Buffer', data: Array.from(val) };
-            }
-            return val;
-        });
-        const parsed = JSON.parse(stringified);
-        await collection.updateOne({ _id: id }, { $set: { data: parsed } }, { upsert: true });
+        await collection.updateOne({ _id: id }, { $set: { data } }, { upsert: true });
     };
 
     const readData = async (id) => {
         try {
             const doc = await collection.findOne({ _id: id });
             if (!doc || !doc.data) return null;
-            const stringified = JSON.stringify(doc.data, (k, val) => {
-                if (val && val.type === 'Buffer' && Array.isArray(val.data)) {
-                    return Buffer.from(val.data);
-                }
-                return val;
-            });
-            return JSON.parse(stringified, (k, val) => {
-                if (val && val.type === 'Buffer' && Array.isArray(val.data)) {
-                    return Buffer.from(val.data);
-                }
-                return val;
-            });
+            return convertToBuffers(doc.data);
         } catch (e) {
             return null;
         }
@@ -136,7 +137,7 @@ async function useMongoDBAuthState(collection) {
 
 async function startBot() {
     if (!MONGODB_URI) {
-        console.error("MONGODB_URI tapılmadı! Render Environment variables bölməsini yoxlayın.");
+        console.error("MONGODB_URI tapılmadı!");
         return;
     }
 
@@ -145,9 +146,6 @@ async function startBot() {
     const db = client.db('whatsapp_bot');
     const collection = db.collection('auth_sessions');
     console.log('MongoDB bazasına uğurla qoşuldu!');
-
-    // Köhnə səhv formatlı məlumatları təmizləmək
-    await collection.deleteMany({});
 
     const { state, saveCreds } = await useMongoDBAuthState(collection);
     const { version } = await fetchLatestBaileysVersion();
@@ -172,7 +170,7 @@ async function startBot() {
             } catch (err) {
                 console.error("Pairing code alınarkən xəta:", err);
             }
-        }, 4000);
+        }, 5000);
     }
 
     sock.ev.on('connection.update', async (update) => {
@@ -226,7 +224,7 @@ async function startBot() {
             } catch (error) {
                 console.error('Xəta:', error);
                 await sock.sendMessage(from, { text: "Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan yazın cavablandırılacaq, təşəkkürlər." });
-            }
+                }
         }
     });
 }
