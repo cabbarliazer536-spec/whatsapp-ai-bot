@@ -57,18 +57,40 @@ Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan
 Tamam , yerləşdirilib linki sizə atılacaq özünüz də baxacaqsınız, sonra ödəniş üçün məlumat göndəriləcək, təşəkkürlər.
 `;
 
+// MongoDB Binary xətasını aradan qaldıran xüsusi autentifikasiya funksiyası
 async function useMongoDBAuthState(collection) {
     const writeData = async (data, id) => {
-        await collection.updateOne({ _id: id }, { $set: { data } }, { upsert: true });
+        const stringified = JSON.stringify(data, (k, val) => {
+            if (Buffer.isBuffer(val)) {
+                return { type: 'Buffer', data: Array.from(val) };
+            }
+            return val;
+        });
+        const parsed = JSON.parse(stringified);
+        await collection.updateOne({ _id: id }, { $set: { data: parsed } }, { upsert: true });
     };
+
     const readData = async (id) => {
         try {
             const doc = await collection.findOne({ _id: id });
-            return doc ? doc.data : null;
-        } catch {
+            if (!doc || !doc.data) return null;
+            const stringified = JSON.stringify(doc.data, (k, val) => {
+                if (val && val.type === 'Buffer' && Array.isArray(val.data)) {
+                    return Buffer.from(val.data);
+                }
+                return val;
+            });
+            return JSON.parse(stringified, (k, val) => {
+                if (val && val.type === 'Buffer' && Array.isArray(val.data)) {
+                    return Buffer.from(val.data);
+                }
+                return val;
+            });
+        } catch (e) {
             return null;
         }
     };
+
     const removeData = async (id) => {
         try { await collection.deleteOne({ _id: id }); } catch {}
     };
@@ -123,6 +145,9 @@ async function startBot() {
     const db = client.db('whatsapp_bot');
     const collection = db.collection('auth_sessions');
     console.log('MongoDB bazasına uğurla qoşuldu!');
+
+    // Köhnə səhv formatlı məlumatları təmizləmək
+    await collection.deleteMany({});
 
     const { state, saveCreds } = await useMongoDBAuthState(collection);
     const { version } = await fetchLatestBaileysVersion();
