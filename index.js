@@ -65,35 +65,36 @@ Salam hər vaxtınız xeyir, əlavə suallarınız varsa zəhmət olmasa buradan
 Tamam , yerləşdirilib linki sizə atılacaq özünüz də baxacaqsınız, sonra ödəniş üçün məlumat göndəriləcək, təşəkkürlər.
 `;
 
-function convertToBuffers(obj) {
-    if (obj === null || obj === undefined) return obj;
-    if (obj instanceof Binary || obj._bsontype === 'Binary') {
-        return Buffer.from(obj.buffer);
+// Buffer-ləri qüsursuz qoruyan JSON köməkçiləri
+function bufferReplacer(key, value) {
+    if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+        return { __isBuffer: true, data: Array.from(value) };
     }
-    if (Buffer.isBuffer(obj)) return obj;
-    if (typeof obj === 'object') {
-        if (Array.isArray(obj)) {
-            return obj.map(convertToBuffers);
-        }
-        const clone = {};
-        for (const key of Object.keys(obj)) {
-            clone[key] = convertToBuffers(obj[key]);
-        }
-        return clone;
+    return value;
+}
+
+function bufferReviver(key, value) {
+    if (value && typeof value === 'object' && value.__isBuffer === true && Array.isArray(value.data)) {
+        return Buffer.from(value.data);
     }
-    return obj;
+    if (value && (value instanceof Binary || value._bsontype === 'Binary')) {
+        return Buffer.from(value.buffer);
+    }
+    return value;
 }
 
 async function useMongoDBAuthState(collection) {
     const writeData = async (data, id) => {
-        await collection.updateOne({ _id: id }, { $set: { data } }, { upsert: true });
+        const serialized = JSON.parse(JSON.stringify(data, bufferReplacer));
+        await collection.updateOne({ _id: id }, { $set: { data: serialized } }, { upsert: true });
     };
 
     const readData = async (id) => {
         try {
             const doc = await collection.findOne({ _id: id });
             if (!doc || !doc.data) return null;
-            return convertToBuffers(doc.data);
+            const stringified = JSON.stringify(doc.data);
+            return JSON.parse(stringified, bufferReviver);
         } catch (e) {
             return null;
         }
@@ -154,6 +155,9 @@ async function startBot() {
         const db = client.db('whatsapp_bot');
         const collection = db.collection('auth_sessions');
         console.log('MongoDB bazasına uğurla qoşuldu!');
+
+        // Köhnə səhv formatlı məlumatları təmizləyirik ki, təmizdən başlasın
+        await collection.deleteMany({});
 
         const { state, saveCreds } = await useMongoDBAuthState(collection);
         const { version } = await fetchLatestBaileysVersion();
