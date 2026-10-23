@@ -1,13 +1,14 @@
 {
   "name": "whatsapp-bot",
   "version": "1.0.0",
-  "description": "WhatsApp Bot with Gemini AI",
+  "description": "WhatsApp Bot with Gemini AI and MongoDB",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
-    "@whiskeysockets/baileys": "^6.7.5"
+    "@whiskeysockets/baileys": "^6.7.5",
+    "mongodb": "^6.3.0"
   }
 }
